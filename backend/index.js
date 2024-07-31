@@ -66,6 +66,33 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // User routes
+app.get("/api/users/me", authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatar: true,
+        bio: true,
+        _count: {
+          select: {
+            followers: true,
+            following: true,
+          },
+        },
+      },
+    });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching user" });
+  }
+});
+
 app.get("/api/users", authenticateToken, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -124,10 +151,15 @@ app.put("/api/users/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// Follow/Unfollow routes
 app.post("/api/users/:id/follow", authenticateToken, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
     const followerId = req.user.userId;
+
+    if (userId === followerId) {
+      return res.status(400).json({ error: "You cannot follow yourself" });
+    }
 
     await prisma.user.update({
       where: { id: userId },
@@ -140,7 +172,7 @@ app.post("/api/users/:id/follow", authenticateToken, async (req, res) => {
   }
 });
 
-app.delete("/api/users/:id/follow", authenticateToken, async (req, res) => {
+app.delete("/api/users/:id/unfollow", authenticateToken, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
     const followerId = req.user.userId;
@@ -153,6 +185,53 @@ app.delete("/api/users/:id/follow", authenticateToken, async (req, res) => {
     res.json({ message: "User unfollowed successfully" });
   } catch (error) {
     res.status(500).json({ error: "Error unfollowing user" });
+  }
+});
+
+// Followers and Following routes
+app.get("/api/users/me/followers", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const followers = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        followers: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    res.json(followers.followers);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching followers" });
+  }
+});
+
+app.get("/api/users/me/following", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const following = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        following: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    res.json(following.following);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching following users" });
   }
 });
 
@@ -229,51 +308,34 @@ app.get("/api/newsfeed", authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const posts = await prisma.post.findMany({
       where: {
-        author: {
-          followers: {
-            some: {
-              id: userId,
+        OR: [
+          { authorId: userId },
+          {
+            author: {
+              followers: {
+                some: {
+                  id: userId,
+                },
+              },
             },
+          },
+        ],
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
           },
         },
       },
-      include: { author: { select: { username: true, avatar: true } } },
       orderBy: { createdAt: "desc" },
       take: 20,
     });
     res.json(posts);
   } catch (error) {
     res.status(500).json({ error: "Error fetching newsfeed" });
-  }
-});
-
-// Route to get followers of the current user
-app.get("/api/users/me/followers", authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const followers = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        followers: {
-          select: {
-            id: true,
-            username: true,
-            email: true,
-            avatar: true,
-          },
-        },
-      },
-    });
-
-    if (!followers) {
-      return res.status(404).json({ error: "No followers found" });
-    }
-
-    res.json(followers.followers);
-  } catch (error) {
-    console.error("Error fetching followers:", error);
-    res.status(500).json({ error: "Error fetching followers" });
   }
 });
 
